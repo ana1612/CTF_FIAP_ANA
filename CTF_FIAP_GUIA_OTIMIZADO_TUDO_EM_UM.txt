@@ -1,0 +1,1070 @@
+CTF FIAP 2026 — GUIA OTIMIZADO TUDO EM UM
+=====================================
+CONSULTA RÁPIDA: use Ctrl+F e busque: XAMPP, PCAP, PDF, BIN, MEMÓRIA,
+VOLATILITY, MALWARE, SNORT, AWK, OSINT, METASPLOIT, WINDOWS, KALI, FLAG.
+
+MAPA DE AÇÃO
+- Arquivo no Windows e análise na Kali -> seção 01 (XAMPP + wget).
+- Arquivo .bin -> seção BIN do ADENDO (não assuma que é memória).
+- Arquivo .pdf -> seção PDF do ADENDO (texto, metadados, anexos).
+- Dump de RAM -> seção 13 (Volatility, PID, PPID, rede, malfind).
+- Captura .pcap/.pcapng -> seção 03 (Wireshark/tshark).
+- Logs -> seção 08 (awk/grep/sed/jq).
+- Intel/OSINT -> seção 04.
+- Imagem -> seção 05.
+- Malware -> seção 06.
+- Cenário com pistas -> CENÁRIOS PRÁTICOS no final.
+
+ATENÇÃO: siga as regras do CTF. Comandos de reconhecimento só em alvos
+autorizados. Não execute amostras desconhecidas. Não publique flags/credenciais
+em repositório público. Substitua nomes de arquivo e IPs nos exemplos.
+
+CTF FIAP — MANUAL FINAL DE CONSULTA
+Windows físico + XAMPP/htdocs + Kali VM + Intel/OSINT + Forense + Malware + PCAP + Imagens
+=======================================================================================
+USO: apenas no ambiente e nos alvos autorizados do CTF. Não execute amostras de malware
+no Windows físico ou na Kali sem isolamento e autorização. Não publique flags, credenciais
+ou amostras em repositórios públicos.
+
+COMO USAR: Ctrl+F para buscar palavras como "TRANSFERIR", "PCAP", "MALWARE", "VOLATILITY".
+Substitua <IP_WINDOWS>, <ARQUIVO>, <DOMINIO> pelos dados reais. Não digite os sinais <>.
+
+===============================================================================
+00 — ROTEIRO DE EMERGÊNCIA: PRIMEIROS 3 MINUTOS
+===============================================================================
+1. Leia o enunciado: qual resposta pede? IP, hash, domínio, processo, usuário, flag?
+2. Descubra onde está o arquivo e sua extensão REAL.
+3. Preserve o original; trabalhe numa cópia.
+4. Comece com ferramentas simples: file, strings, exiftool, Wireshark, hashes.
+5. Anote evidências, horários, filtros e a resposta exata exigida.
+6. Se travar por 10 minutos, passe ao próximo desafio e retorne depois.
+
+===============================================================================
+01 — WINDOWS FÍSICO -> KALI VM COM XAMPP: PASSO A PASSO
+===============================================================================
+CENÁRIO: arquivos do desafio estão no Windows físico e você quer analisá-los na Kali.
+
+NO WINDOWS — descobrir os endereços:
+  ipconfig
+  ipconfig /all
+  route print
+
+O QUE SIGNIFICA:
+- ipconfig mostra IPv4 de cada interface.
+- ipconfig /all mostra detalhes, gateway, DNS e adaptadores virtuais.
+- route print mostra as rotas. Atenção: o Windows pode ter IP de Ethernet,
+  Wi-Fi e adaptadores VMware/VirtualBox; o IP certo é o que a Kali alcança.
+
+NA KALI — descobrir rede e rota:
+  ip -br addr
+  ip route
+  hostname -I
+
+O QUE SIGNIFICA:
+- ip -br addr lista interfaces e IPs resumidamente.
+- ip route revela a rota padrão e redes locais.
+- hostname -I mostra IPs atribuídos à máquina.
+
+TESTAR CONECTIVIDADE (substitua o IP):
+  ping -c 4 <IP_WINDOWS>
+  curl -I http://<IP_WINDOWS>/
+  curl -v http://<IP_WINDOWS>/ctf/teste.txt
+
+IMPORTANTE: ping pode falhar porque ICMP está bloqueado; curl testa o HTTP.
+"Connection refused" = porta sem serviço; "timed out" = caminho/firewall;
+"404" = servidor acessível, mas arquivo/caminho incorreto; "403" = acesso negado.
+
+NO WINDOWS — XAMPP:
+1. Abra XAMPP Control Panel e clique Start ao lado de Apache.
+2. Teste http://localhost/ no navegador do Windows.
+3. Crie C:\xampp\htdocs\ctf\
+4. Copie para essa pasta apenas os arquivos de desafio permitidos.
+   Exemplo: C:\xampp\htdocs\ctf\captura.pcapng
+5. Verifique se http://localhost/ctf/captura.pcapng responde.
+6. Se Apache usa 8080 em vez de 80, inclua :8080 na URL.
+7. Não altere o firewall nem exponha dados sensíveis sem autorização.
+
+NA KALI — BAIXAR OS ARQUIVOS:
+  mkdir -p ~/ctf
+  cd ~/ctf
+  wget http://<IP_WINDOWS>/ctf/captura.pcapng
+  wget http://<IP_WINDOWS>/ctf/imagem.png
+  wget http://<IP_WINDOWS>/ctf/desafio.zip
+  curl -fLO http://<IP_WINDOWS>/ctf/arquivo.bin
+  ls -lah
+  file *
+
+O QUE SIGNIFICA:
+- mkdir -p cria pasta sem erro se já existe.
+- cd muda para a pasta.
+- wget baixa o arquivo para a pasta atual.
+- curl -fLO falha em HTTP 4xx/5xx, usa nome remoto e segue redirecionamentos.
+- ls -lah mostra arquivos, tamanhos e ocultos.
+- file * identifica o tipo real de cada arquivo.
+
+VALIDAR CÓPIA (integridade):
+  # Windows CMD:
+  certutil -hashfile C:\xampp\htdocs\ctf\captura.pcapng SHA256
+  # Kali:
+  sha256sum ~/ctf/captura.pcapng
+Se os hashes forem iguais, o conteúdo foi transferido sem alteração.
+
+DIAGNÓSTICO EXTRA:
+  # Windows:
+  netstat -ano | findstr :80
+  # Kali:
+  curl -I http://<IP_WINDOWS>:8080/
+  ip route get <IP_WINDOWS>
+
+Se não houver conexão, verifique modo de rede da VM (NAT, host-only, bridge)
+e peça ao responsável do laboratório a configuração permitida.
+
+ATENÇÃO SOBRE O DIRETÓRIO: Apache normalmente NÃO lista arquivos da pasta
+quando a listagem está desabilitada. Use o nome exato na URL; não dependa de
+abrir http://<IP_WINDOWS>/ctf/ e ver uma lista.
+
+===============================================================================
+02 — IDENTIFICAR ARQUIVO, PROTEGER ORIGINAL E TRIAGEM
+===============================================================================
+  pwd                         # pasta atual
+  ls -lah                     # lista detalhada, inclusive ocultos
+  file arquivo                # tipo real
+  stat arquivo                # tamanho, datas e metadados do sistema
+  sha256sum arquivo           # impressão digital SHA-256
+  strings -a arquivo | head -n 60   # textos legíveis no binário
+  xxd -l 128 arquivo          # primeiros 128 bytes em hexadecimal
+  hexdump -C arquivo | head   # outra visão hexadecimal
+  find . -type f              # todos os arquivos abaixo da pasta
+  find . -iname '*flag*'      # nomes contendo flag (sem diferenciar caixa)
+  grep -RniE 'flag|ctf|fiap' .  # texto recursivo, com linha e nome do arquivo
+
+WINDOWS:
+  dir /a
+  where python
+  certutil -hashfile arquivo SHA256
+  findstr /spin /c:"flag" *.*
+POWERSHELL:
+  Get-ChildItem -Force
+  Get-FileHash .\arquivo -Algorithm SHA256
+  Get-ChildItem -Recurse -File | Select-String -Pattern 'flag','ctf','fiap'
+
+OBS: procurar a palavra "flag" nem sempre basta. Leia o enunciado para saber
+o formato e a evidência exigida. Não confunda strings ocasionais com prova.
+
+===============================================================================
+03 — PCAP / PCAPNG: O QUE FAZER
+===============================================================================
+GUIA:
+1. Abra a captura no Wireshark; Statistics > Protocol Hierarchy e Conversations.
+2. Procure DNS, HTTP, FTP, SMTP e tráfego incomum.
+3. Use Follow > TCP Stream / UDP Stream para reconstruir conversas.
+4. Em File > Export Objects > HTTP, veja se houve transferência de arquivos.
+5. Correlacione IPs, horários e nomes de domínio.
+
+WIRESHARK — FILTROS DE EXIBIÇÃO (na barra de filtro):
+  dns
+  http
+  http.request
+  tcp
+  tls
+  ftp
+  smtp
+  ip.addr == 192.168.56.101
+  tcp.port == 80
+  dns.qry.name contains "exemplo"
+  frame contains "flag"
+  tcp contains "flag"
+  http.request.method == "POST"
+  tcp.analysis.retransmission
+
+O QUE SIGNIFICA:
+- dns mostra consultas e respostas DNS.
+- http.request mostra requisições HTTP.
+- ip.addr mostra tráfego de/para aquele IP.
+- frame contains busca sequência de bytes no pacote.
+- Follow TCP Stream é frequentemente mais útil do que olhar pacotes isolados.
+
+TSHARK — COMANDOS PRONTOS:
+  tshark -r captura.pcapng -q -z io,phs
+  tshark -r captura.pcapng -q -z conv,ip
+  tshark -r captura.pcapng -Y dns -T fields -e frame.time -e ip.src -e dns.qry.name
+  tshark -r captura.pcapng -Y http.request -T fields -e ip.src -e http.host -e http.request.uri
+  tshark -r captura.pcapng -Y 'tcp.port == 80' -T fields -e tcp.stream | sort -nu
+  tshark -r captura.pcapng -q -z follow,tcp,ascii,0
+
+EXPLICAÇÃO:
+- -r lê arquivo salvo (não captura ao vivo).
+- -Y aplica filtro de exibição.
+- -T fields escolhe saída em colunas.
+- -e seleciona um campo, como dns.qry.name.
+- -z conv,ip mostra conversas entre IPs.
+- -z follow,tcp,ascii,0 reconstrói o fluxo TCP índice 0 (troque o número).
+
+TCPDUMP — VER RESUMO:
+  tcpdump -nn -r captura.pcapng
+  tcpdump -nn -r captura.pcapng 'port 53'
+  tcpdump -nn -r captura.pcapng 'host 192.168.56.101'
+-nn evita resolver nomes/portas; -r lê o arquivo.
+
+SNORT — ANÁLISE OFFLINE (sintaxe pode variar por versão):
+  snort -V
+  snort -r captura.pcap -A console -c /etc/snort/snort.conf
+Se a configuração não existir, verifique a instalação/versão; não invente
+caminhos. Regras Snort 2 e Snort 3 têm diferenças de configuração.
+
+REGRA SIMPLES DE EXEMPLO (em laboratório):
+  alert tcp any any -> any 80 (msg:"CTF HTTP"; sid:1000001; rev:1;)
+Significa: alertar tráfego TCP destinado à porta 80; sid identifica a regra.
+Ela é propositalmente ampla: não prova atividade maliciosa.
+
+===============================================================================
+04 — INTEL / OSINT: IP, DOMÍNIO, HASH, E-MAIL
+===============================================================================
+  whois exemplo.org              # registro público de domínio (se disponível)
+  dig exemplo.org A              # IPv4 do domínio
+  dig exemplo.org MX             # servidores de e-mail
+  dig exemplo.org TXT            # TXT, como SPF
+  dig +short exemplo.org         # resposta DNS resumida
+  nslookup exemplo.org           # alternativa comum no Windows
+  sha256sum suspeito.bin          # hash para buscar em base de IOCs
+  date -u                         # horário UTC para correlacionar logs
+
+Perguntas típicas:
+- Qual IP consultou o domínio suspeito? -> DNS no PCAP.
+- Qual hash SHA-256 da amostra? -> sha256sum / Get-FileHash.
+- Qual domínio aparece na comunicação? -> tshark DNS/HTTP/TLS.
+- Qual técnica MITRE corresponde ao comportamento? -> identifique primeiro
+  a ação observada, depois mapeie para a técnica (não adivinhe por nome).
+
+===============================================================================
+05 — IMAGEM / ESTEGANOGRAFIA / METADADOS
+===============================================================================
+  file imagem.png
+  exiftool imagem.png
+  identify imagem.png            # ImageMagick, se instalado
+  strings -a imagem.png | less
+  strings -a imagem.png | grep -iE 'flag|ctf|http'
+  binwalk imagem.png
+  xxd -l 64 imagem.png
+  pngcheck -v imagem.png         # se instalado; valida estrutura PNG
+  zsteg imagem.png               # se instalado; útil para PNG/BMP
+  steghide info foto.jpg         # se instalado; JPEG/BMP/WAV/AU
+  unzip -l arquivo.zip           # listar ZIP sem extrair
+
+ATENÇÃO:
+- "file" revela formato verdadeiro mesmo se a extensão estiver errada.
+- EXIF pode conter autor, software, comentários e datas; pode não existir.
+- binwalk detecta assinaturas incorporadas, mas pode produzir falsos positivos.
+- steghide pode exigir senha; não force tentativas fora do escopo do desafio.
+- Preserve a imagem original; prints e reenvios podem remover metadados.
+
+===============================================================================
+06 — MALWARE: TRIAGEM ESTÁTICA SEM EXECUTAR
+===============================================================================
+  file amostra.exe
+  sha256sum amostra.exe
+  strings -a -n 6 amostra.exe | head -n 100
+  strings -a amostra.exe | grep -iE 'http|https|powershell|cmd.exe|AppData|Run\\'
+  objdump -x amostra.exe | head -n 100
+  xxd -l 128 amostra.exe
+
+WINDOWS/POWERSHELL:
+  Get-FileHash .\amostra.exe -Algorithm SHA256
+  Get-Item .\amostra.exe | Format-List *
+  Get-AuthenticodeSignature .\amostra.exe
+
+O QUE PROCURAR:
+- URLs, IPs, nomes de mutex, chaves Run, caminhos AppData/Temp.
+- Imports e APIs relacionadas a rede, processos e persistência.
+- Strings em UTF-16LE: strings comum pode não encontrá-las.
+- EncodedCommand e FromBase64String em scripts PowerShell.
+- Um IOC isolado não é prova suficiente; correlacione com outros artefatos.
+
+NÃO rode malware na máquina física; peça VM isolada/autorizada.
+
+===============================================================================
+07 — FORENSE WINDOWS / LINUX / MEMÓRIA
+===============================================================================
+WINDOWS CMD:
+  whoami /all
+  hostname
+  systeminfo
+  tasklist /v
+  netstat -ano
+  ipconfig /all
+  dir /a /s C:\Users\Public
+
+POWERSHELL:
+  Get-Process | Sort-Object CPU -Descending | Select-Object -First 15
+  Get-NetTCPConnection | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess
+  Get-WinEvent -FilterHashtable @{LogName='Security';Id=4624} -MaxEvents 10
+  Get-ChildItem C:\Users\Public -Recurse -Force -ErrorAction SilentlyContinue
+
+LINUX:
+  whoami
+  id
+  uname -a
+  ps aux
+  ss -tulpn
+  journalctl -n 100 --no-pager
+  find /tmp -type f -mtime -1
+  last -n 10
+
+VOLATILITY 3 (somente se instalado; nome executável pode ser vol, vol.py):
+  vol -f memoria.raw windows.info
+  vol -f memoria.raw windows.pslist
+  vol -f memoria.raw windows.pstree
+  vol -f memoria.raw windows.cmdline
+  vol -f memoria.raw windows.netscan
+  vol -f memoria.raw windows.filescan
+
+INTERPRETAÇÃO:
+- pslist: processos ativos; pstree: relações pai/filho.
+- cmdline: argumentos de inicialização.
+- netscan: conexões/artefatos de rede.
+- filescan: objetos de arquivo presentes na memória.
+Nem todo plugin funciona com toda imagem; confira versão e símbolos.
+
+===============================================================================
+08 — LOGS COM AWK / GREP / SED / SORT / UNIQ / JQ
+===============================================================================
+  head -n 20 access.log
+  tail -n 30 access.log
+  grep -niE 'error|failed|denied' access.log
+  awk '{print $1}' access.log | sort | uniq -c | sort -nr | head
+  awk '{print $9}' access.log | sort | uniq -c | sort -nr
+  grep ' 404 ' access.log | head
+  sed -n '10,30p' access.log
+  jq '.' resposta.json
+  jq -r '.items[]?.name' resposta.json
+
+EXPLICAÇÃO:
+- head/tail: começo/fim do arquivo.
+- grep -n: mostra número da linha; -i ignora maiúsculas; -E usa regex.
+- awk '{print $1}': primeira coluna (frequentemente IP no log combinado).
+- sort | uniq -c: agrupa e conta; sort -nr: maiores contagens primeiro.
+- awk '{print $9}': status HTTP SOMENTE se o log segue formato combinado.
+- sed -n '10,30p': mostra linhas 10 a 30.
+- jq: lê JSON; -r remove aspas de strings; ? evita alguns erros de ausência.
+
+NÃO suponha o formato do log. Primeiro use head e identifique as colunas.
+
+===============================================================================
+09 — NMAP / METASPLOIT: APENAS ALVOS AUTORIZADOS
+===============================================================================
+  nmap -sV <IP_ALVO>
+  nmap -sC -sV -p 80,443,445 <IP_ALVO>
+  nmap -p- <IP_ALVO>
+
+EXPLICAÇÃO:
+- -sV tenta identificar versões dos serviços.
+- -sC executa scripts padrão do Nmap.
+- -p lista portas específicas; -p- inclui todas as portas TCP.
+A varredura pode ser demorada; respeite escopo e tempo do desafio.
+
+METASPLOIT — CONSOLE E INVESTIGAÇÃO DE MÓDULOS:
+  msfconsole
+  help
+  search type:auxiliary smb
+  info <NOME_DO_MODULO>
+  use <NOME_DO_MODULO>
+  show options
+  show targets
+  back
+  exit
+
+EXPLICAÇÃO:
+- search localiza módulos por categoria/palavra.
+- info descreve finalidade, referências e requisitos.
+- use seleciona o módulo.
+- show options mostra parâmetros obrigatórios.
+- show targets lista alvos compatíveis, quando aplicável.
+- back retorna ao contexto anterior.
+Antes de qualquer teste ativo, confirme que o IP é parte do laboratório.
+
+===============================================================================
+10 — CODIFICAÇÃO / HASH / TEXTO
+===============================================================================
+  printf '%s' 'SGVsbG8=' | base64 -d
+  printf '%s' '48656c6c6f' | xxd -r -p
+  printf '%s' 'texto' | sha256sum
+  echo 'uryyb' | tr 'A-Za-z' 'N-ZA-Mn-za-m'   # ROT13
+
+POWERSHELL:
+  [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("SGVsbG8="))
+  Get-FileHash .\arquivo.bin -Algorithm SHA256
+
+OBS: Base64 e hex são codificações, NÃO criptografia. Hash não é
+reversível de forma geral; identifique se o enunciado pede comparação.
+
+===============================================================================
+11 — DICAS DE BUSCA NO GPT DURANTE O CTF
+===============================================================================
+Ao enviar um desafio, inclua:
+- Enunciado integral e formato esperado da flag.
+- Arquivo ORIGINAL (.pcapng, .png, .zip, .raw, .exe) se permitido.
+- O que você já tentou e o resultado exato do terminal.
+- IPs/nomes apenas do laboratório, sem dados pessoais.
+
+PERGUNTAS ÚTEIS:
+"Analise este PCAP e liste os cinco fluxos mais relevantes com justificativa."
+"Quais metadados e assinaturas devo verificar nesta imagem original?"
+"Este log segue qual formato? Escreva o awk correto para contar os IPs."
+"Explique por que este comando falhou e como diagnosticar sem apagar nada."
+"Qual evidência sustenta esta possível flag? Não chute a resposta."
+
+===============================================================================
+12 — ÚLTIMO CHECKLIST
+===============================================================================
+[ ] Confirmar se GPT/GitHub e consulta externa são permitidos.
+[ ] Conferir IP Windows e IP Kali; testar HTTP.
+[ ] Apache do XAMPP iniciado e arquivo em C:\xampp\htdocs\ctf\
+[ ] wget/curl na Kali; comparar SHA-256.
+[ ] Ler enunciado antes de rodar ferramentas.
+[ ] Guardar originais; não executar amostras suspeitas.
+[ ] Conferir formato exato da flag antes de enviar.
+[ ] Se travar, alternar desafio e registrar evidências.
+
+===============================================================================
+
+
+==============================================================================
+ADENDO BIN E PDF — TRIAGEM ESPECÍFICA
+==============================================================================
+CTF FIAP — ADENDO PRÁTICO: ARQUIVOS .BIN E .PDF
+================================================
+Guia de triagem, análise e transferência Windows físico -> Kali VM.
+Uso apenas em desafios e laboratórios autorizados. Preserve os arquivos originais.
+
+1) PRIMEIRO: TRANSFERIR DO WINDOWS (XAMPP) PARA A KALI
+-----------------------------------------------------
+No Windows físico:
+  ipconfig
+  # Anote o IPv4 do adaptador acessível pela Kali.
+  # Abra XAMPP Control Panel e clique Start em Apache.
+  # Coloque desafio.bin e desafio.pdf em C:\xampp\htdocs\ctf\
+  # Teste no navegador do Windows: http://localhost/ctf/desafio.pdf
+
+Na Kali:
+  ip -br addr
+  ip route
+  ping -c 4 IP_DO_WINDOWS
+  curl -I http://IP_DO_WINDOWS/ctf/desafio.pdf
+  mkdir -p ~/ctf && cd ~/ctf
+  wget http://IP_DO_WINDOWS/ctf/desafio.bin
+  wget http://IP_DO_WINDOWS/ctf/desafio.pdf
+  ls -lh
+  file desafio.bin desafio.pdf
+
+Substitua IP_DO_WINDOWS e nomes de arquivos. Se Apache usar porta 8080,
+utilize http://IP_DO_WINDOWS:8080/ctf/desafio.bin.
+Erro 404 = caminho/nome errado; 403 = acesso negado; connection refused =
+Apache/porta indisponível; timeout = rota/firewall/rede. Ping pode estar bloqueado.
+Não desative o firewall sem autorização. Compare SHA256 na origem e destino:
+  # Windows CMD: certutil -hashfile C:\xampp\htdocs\ctf\desafio.bin SHA256
+  # Kali:        sha256sum desafio.bin
+
+2) BIN — TRIAGEM INICIAL
+-----------------------
+  file desafio.bin
+  ls -lh desafio.bin
+  stat desafio.bin
+  sha256sum desafio.bin
+  xxd -l 256 desafio.bin
+  strings -a -n 5 desafio.bin | head -n 100
+  strings -a desafio.bin | grep -iE 'flag|ctf|fiap|https?://|password|key'
+  binwalk desafio.bin
+
+EXPLICAÇÃO:
+  file: identifica assinatura/tipo real; extensão .bin não define o formato.
+  ls/stat: tamanho e datas; sha256sum: impressão digital para integridade.
+  xxd: mostra bytes hexadecimais; cabeçalho pode indicar ZIP, PDF, PNG, ELF etc.
+  strings: procura sequências legíveis; grep filtra termos importantes.
+  binwalk: procura assinaturas de formatos dentro do arquivo; resultados podem
+  ser falsos positivos. Não extraia ou execute cegamente conteúdo desconhecido.
+
+Se o arquivo for ZIP ou outro contêiner, liste antes de extrair:
+  unzip -l desafio.bin
+  7z l desafio.bin
+Se for executável ELF ou PE, faça análise ESTÁTICA, não execute:
+  objdump -x desafio.bin | head -n 100
+  strings -a desafio.bin | grep -iE 'cmd.exe|powershell|http|AppData|/bin/sh'
+Se for memória RAM do Windows e Volatility 3 estiver instalado:
+  vol -f desafio.bin windows.info
+  vol -f desafio.bin windows.pslist
+  vol -f desafio.bin windows.pstree
+  vol -f desafio.bin windows.cmdline
+  vol -f desafio.bin windows.netscan
+  vol -f desafio.bin windows.filescan
+  # Alguns plugins dependem da imagem e símbolos disponíveis.
+Se for firmware ou arquivo desconhecido, use 'file', 'xxd', 'binwalk' e o
+ENUNCIADO para decidir o próximo passo. Não assuma que todo BIN é memória.
+
+3) PDF — TRIAGEM E FORENSE
+-------------------------
+  file desafio.pdf
+  pdfinfo desafio.pdf
+  exiftool desafio.pdf
+  pdftotext -layout desafio.pdf texto.txt
+  less texto.txt
+  grep -niE 'flag|ctf|fiap|senha|password|http' texto.txt
+  pdfdetach -list desafio.pdf
+  strings -a desafio.pdf | grep -iE '/JavaScript|/JS|/OpenAction|/EmbeddedFile|/URI'
+  qpdf --check desafio.pdf
+
+EXPLICAÇÃO:
+  pdfinfo: páginas, autor, produtor, datas e criptografia (quando disponíveis).
+  exiftool: metadados adicionais; metadados podem ser ausentes ou manipulados.
+  pdftotext -layout: extrai texto e tenta manter colunas; PDF digitalizado pode
+  não ter texto extraível (nesse caso, inspecione as páginas visualmente).
+  grep -niE: procura pistas, mostrando número da linha.
+  pdfdetach -list: lista arquivos anexados ao PDF, sem executá-los.
+  strings + grep: procura indicadores de scripts, links, anexos e ações.
+  qpdf --check: verifica a estrutura do PDF; pode não estar instalado.
+
+Se houver anexos e o desafio autorizar extração:
+  mkdir -p anexos
+  pdfdetach -saveall -o anexos desafio.pdf
+  # Verifique a ajuda da versão instalada: pdfdetach -h
+  # Nunca execute anexos desconhecidos no computador físico.
+
+Se o PDF estiver protegido por senha, primeiro procure pistas no enunciado,
+metadados e arquivos relacionados. Não tente quebrar proteção fora do escopo.
+
+4) QUANDO O PDF E O BIN VÊM JUNTOS
+--------------------------------
+Hipóteses úteis, mas NÃO garantidas:
+- O PDF contém instruções/senha para interpretar o BIN.
+- O BIN guarda uma imagem, memória, arquivo compactado ou evidência citada no PDF.
+- O PDF é o enunciado e o BIN é o artefato principal.
+Passos:
+  1. pdfinfo e pdftotext no PDF; leia o enunciado integral.
+  2. file, sha256sum, xxd e strings no BIN.
+  3. Compare nomes, datas, hashes, IPs, URLs e termos presentes nos dois.
+  4. Escolha a ferramenta específica somente após identificar o formato.
+  5. Confira se a resposta pede flag, processo, IP, domínio, hash ou horário.
+
+5) MINI-REFERÊNCIA WINDOWS
+-------------------------
+CMD:
+  dir /a
+  ipconfig
+  certutil -hashfile desafio.bin SHA256
+PowerShell:
+  Get-ChildItem -Force
+  Get-FileHash .\desafio.bin -Algorithm SHA256
+  Get-Item .\desafio.pdf | Format-List *
+
+6) COMO PEDIR AJUDA DURANTE O CTF
+--------------------------------
+Envie o enunciado COMPLETO e os arquivos ORIGINAIS .bin/.pdf, se as regras
+permitirem, ou cole a saída de:
+  file desafio.bin
+  ls -lh desafio.bin
+  xxd -l 64 desafio.bin
+  pdfinfo desafio.pdf
+Diga o formato exato da resposta esperado. Não invente flags: valide as pistas.
+
+
+==============================================================================
+DUMP DE MEMÓRIA — VOLATILITY
+==============================================================================
+
+===============================================================================
+13 — DUMP DE MEMÓRIA RAM: GUIA DE INVESTIGAÇÃO PASSO A PASSO
+===============================================================================
+OBJETIVO: encontrar evidências em capturas de RAM (.raw, .mem, .dmp, .bin).
+Não execute o arquivo: analise-o com ferramentas forenses. Use somente material
+fornecido ou autorizado pela competição.
+
+PASSO 1 — RECEBER E PRESERVAR
+  mkdir -p ~/ctf/memoria
+  cd ~/ctf/memoria
+  file dump.bin
+  ls -lh dump.bin
+  sha256sum dump.bin
+  cp -n dump.bin copia_trabalho.bin
+Explicação: file tenta reconhecer o formato; ls mostra tamanho; sha256sum
+registra a integridade; cp -n evita sobrescrever uma cópia existente.
+Um .bin NÃO é necessariamente dump de RAM: confirme com o enunciado.
+
+PASSO 2 — DESCOBRIR SE VOLATILITY 3 ESTÁ DISPONÍVEL
+  vol -h
+  vol -f dump.bin windows.info
+Se vol não existir, tente:
+  vol.py -h
+  python3 vol.py -f dump.bin windows.info
+A forma exata depende da instalação. Se o plugin falhar, confira o erro e se
+é realmente um dump Windows. Símbolos e versão do sistema podem afetar a análise.
+
+PASSO 3 — PRIMEIRA TRIAGEM DE PROCESSOS WINDOWS
+  vol -f dump.bin windows.pslist
+  vol -f dump.bin windows.pstree
+  vol -f dump.bin windows.psscan
+  vol -f dump.bin windows.cmdline
+  vol -f dump.bin windows.dlllist
+Interpretação:
+- pslist: processos vinculados às listas usuais do sistema.
+- pstree: hierarquia pai/filho. Ex.: processo de escritório iniciando shell
+  merece investigação, mas não é prova isolada de malware.
+- psscan: varre estruturas de processo; pode revelar processos encerrados ou
+  não visíveis na lista padrão; também pode ter artefatos residuais.
+- cmdline: parâmetros usados para iniciar processos, quando recuperáveis.
+- dlllist: bibliotecas carregadas, útil para contexto.
+Anote PID, PPID, nome, horário de criação e argumento suspeito.
+
+PASSO 4 — CONEXÕES DE REDE
+  vol -f dump.bin windows.netscan
+O netscan pode revelar IP local/remoto, portas, PID e estado. Cruze PID com
+pslist/pstree/cmdline. Conexão para IP externo NÃO basta para concluir ataque.
+
+PASSO 5 — ARQUIVOS, REGISTRO E CONTAS
+  vol -f dump.bin windows.filescan
+  vol -f dump.bin windows.registry.hivelist
+  vol -f dump.bin windows.getsids
+  vol -f dump.bin windows.envars
+Explicação: filescan encontra objetos de arquivo; hivelist identifica hives
+do Registro; getsids associa processos a SIDs; envars mostra variáveis de
+ambiente que podem conter caminhos e pistas. Disponibilidade varia por versão.
+
+PASSO 6 — MALWARE / INJEÇÃO / REGIÕES SUSPEITAS
+  vol -f dump.bin windows.malfind
+  vol -f dump.bin windows.vadinfo --pid 1234
+Troque 1234 pelo PID suspeito. malfind destaca regiões de memória com
+características que merecem investigação; NÃO confirma malware sozinho.
+vadinfo examina regiões de memória virtual de um processo.
+
+PASSO 7 — INVESTIGAR PROCESSO ESPECÍFICO
+  vol -f dump.bin windows.cmdline --pid 1234
+  vol -f dump.bin windows.dlllist --pid 1234
+  vol -f dump.bin windows.handles --pid 1234
+Se o plugin não aceitar --pid ou estiver ausente, veja ajuda específica:
+  vol windows.cmdline -h
+  vol windows.handles -h
+Handles podem apontar arquivos, chaves e objetos usados pelo processo.
+
+PASSO 8 — EXPORTAR RESULTADOS PARA CONSULTAR
+  vol -f dump.bin windows.pslist > processos.txt
+  vol -f dump.bin windows.netscan > conexoes.txt
+  grep -niE 'powershell|cmd.exe|http|temp|appdata' processos.txt conexoes.txt
+O redirecionamento > salva texto; grep -n mostra linha, -i ignora caixa,
+-E permite expressões regulares.
+
+PASSO 9 — SE FOR MEMÓRIA LINUX
+  vol -f dump.bin linux.pslist
+  vol -f dump.bin linux.pstree
+  vol -f dump.bin linux.bash
+Plugins Linux exigem símbolos adequados ao kernel. Use 'vol -h' para ver os
+plugins instalados. Não use plugins windows.* em dump Linux.
+
+CENÁRIOS DE PROVA:
+A) 'Qual PID executou um comando suspeito?'
+   1. windows.pstree -> 2. windows.cmdline -> 3. cruzar PID/horário.
+B) 'Qual IP o processo acessou?'
+   1. windows.netscan -> 2. identificar PID -> 3. windows.pslist/cmdline.
+C) 'Qual processo foi encerrado ou ocultado?'
+   1. comparar pslist e psscan -> 2. validar com pstree e outros artefatos.
+D) 'Há evidência de injeção de código?'
+   1. malfind -> 2. vadinfo do PID -> 3. analisar evidências adicionais.
+E) 'Qual arquivo foi aberto?'
+   1. filescan -> 2. handles do processo -> 3. cruzar caminhos.
+
+ERROS COMUNS:
+- 'Unsatisfied requirement': símbolos/camada de memória não identificados.
+- Plugin inexistente: versão/instalação diferente; consulte 'vol -h'.
+- Resultado vazio: nem sempre significa ausência da atividade; memória é
+  uma fotografia parcial e artefatos podem não ter sido capturados.
+- Dump muito grande: evite repetir plugins demorados sem registrar resultados.
+
+REGRA DE OURO: não chute flags. Documente o comando, o campo encontrado e a
+relação com a pergunta. Evite enviar dumps que contenham dados pessoais para
+serviços públicos sem autorização.
+
+
+==============================================================================
+CENÁRIOS PRÁTICOS E COMANDOS
+==============================================================================
+CTF FIAP — CENÁRIOS PRÁTICOS E COMANDOS COMENTADOS
+GUIA DE ÚLTIMA HORA | USAR SOMENTE EM ALVOS AUTORIZADOS DA COMPETIÇÃO
+
+COMO USAR: Ctrl+F e pesquise: PCAP, LOG, WINDOWS, WEB, LINUX, SNORT, AWK, METASPLOIT, FORENSE, CRIPTO, ESTEGANO, AD, FLAG, SOCORRO.
+Símbolos: <ARQUIVO>, <IP>, <PORTA>, <URL> = substitua por valores do desafio. Exemplos usam alvos locais ou de laboratório.
+Atenção: NÃO execute comandos de alteração, exploração ou varredura fora do escopo permitido pelo CTF. Não faça upload de artefatos confidenciais a serviços públicos.
+
+================== 0. SOCORRO: NÃO SEI POR ONDE COMEÇAR ==================
+1) Leia o enunciado inteiro. Anote formato da flag, objetivo, arquivos e escopo.
+2) Classifique: WEB / REDE-PCAP / FORENSE / CRIPTO / BINÁRIO / WINDOWS / LINUX / AD.
+3) Identifique o material: arquivo? URL? IP? credenciais de laboratório? dump?
+4) Faça primeiro inspeção NÃO destrutiva. Registre pistas em um TXT local.
+5) Não confunda encontrar vulnerabilidade com encontrar a flag: leia a saída.
+6) Se 10–15 min sem avanço, anote o que tentou, pule e volte depois.
+7) A flag pode estar em comentário HTML, cabeçalho, metadado, log, cookie, pacote, imagem, pasta oculta ou variável de ambiente de laboratório.
+8) Confira maiúsculas, minúsculas, chaves e espaços da flag exatamente.
+
+COMANDOS DE DESCOBERTA DE FERRAMENTAS:
+Linux: command -v nmap; command -v tshark; command -v snort; command -v python3
+Windows CMD: where python; where nmap; where powershell
+PowerShell: Get-Command python,nmap,Get-FileHash -ErrorAction SilentlyContinue
+Ajuda embutida: comando --help | less ; man comando ; Get-Help Get-ChildItem -Examples
+
+================== 1. RECEBI ARQUIVO DESCONHECIDO ==================
+Linux:
+  pwd                                # pasta atual
+  ls -lah                            # mostra inclusive arquivos ocultos, tamanhos
+  file desafio.bin                   # identifica formato real, não confie na extensão
+  stat desafio.bin                   # datas, tamanho e permissões
+  sha256sum desafio.bin              # calcula hash para identificar cópias
+  strings -a -n 5 desafio.bin | less  # extrai sequências legíveis com >=5 caracteres
+  strings -a desafio.bin | grep -Ein 'flag|ctf|pass|token|secret|key' # procura pistas
+  xxd -l 128 desafio.bin             # primeiros 128 bytes em hexadecimal
+  hexdump -C desafio.bin | head      # alternativa ao xxd
+  find . -maxdepth 3 -type f         # lista arquivos até 3 níveis
+Windows PowerShell:
+  Get-ChildItem -Force               # lista arquivos ocultos
+  Get-Item .\desafio.bin | Format-List * # metadados do arquivo
+  Get-FileHash .\desafio.bin -Algorithm SHA256 # hash
+  Format-Hex -Path .\desafio.bin | Select-Object -First 12 # início hexadecimal
+  Get-ChildItem -Recurse -File | Select-String -Pattern 'flag|ctf|secret' # texto em arquivos legíveis
+Interpretação: PK no início sugere ZIP; 89 50 4E 47 sugere PNG; 25 50 44 46 sugere PDF; MZ sugere PE Windows; 7F 45 4C 46 sugere ELF.
+Próximo passo: use a seção correspondente ao tipo real detectado.
+
+================== 2. FLAG ESCONDIDA EM PASTAS OU TEXTO ==================
+Linux:
+  find . -type f -iname '*flag*' 2>/dev/null
+  find . -type f -name '.*' 2>/dev/null
+  grep -RinE 'flag\{|ctf\{|password|secret' . 2>/dev/null
+  grep -RIl 'flag' . 2>/dev/null  # mostra apenas nomes de arquivos com ocorrência
+  find . -type f -size -10k         # arquivos pequenos, comuns em desafios
+Windows PowerShell:
+  Get-ChildItem -Force -Recurse -File | Where-Object Name -match 'flag|secret|pass'
+  Get-ChildItem -Recurse -File -ErrorAction SilentlyContinue | Select-String -Pattern 'flag\{|ctf\{' -ErrorAction SilentlyContinue
+  Get-ChildItem Env:                 # variáveis de ambiente, somente na máquina do desafio
+Dica: em Linux, Ctrl+H no gerenciador de arquivos costuma mostrar ocultos; ls -la no terminal.
+
+================== 3. RECEBI PCAP: WIRESHARK ==================
+Passos gráficos:
+1. File > Open > arquivo.pcapng.
+2. Statistics > Protocol Hierarchy: veja HTTP, DNS, SMB, FTP, ICMP etc.
+3. Statistics > Conversations: veja quem fala com quem.
+4. Filtro 'http' para tráfego HTTP; 'dns' para DNS; 'tcp.stream eq 0' para um fluxo.
+5. Clique direito no pacote > Follow > TCP Stream (ou HTTP Stream): veja a conversa completa.
+6. File > Export Objects > HTTP (quando houver): arquivos transferidos.
+Filtros Wireshark (barra de filtro):
+  http
+  dns
+  dns.qry.name contains "flag"
+  http.request
+  http.request.method == "POST"
+  http.response.code == 200
+  http contains "flag"
+  tcp contains "flag"
+  frame contains "CTF"
+  ip.addr == 192.0.2.10
+  tcp.port == 80
+  smb2
+  ftp
+  icmp
+  tcp.analysis.retransmission
+Observações: filtros de exibição não alteram o arquivo. HTTP sem TLS pode revelar texto; HTTPS normalmente é criptografado. 'contains' encontra bytes visíveis, não descriptografa TLS.
+
+================== 4. RECEBI PCAP: TSHARK / TCPDUMP ==================
+  tshark -r captura.pcapng -q -z io,phs
+    # -r lê arquivo, -q resumo, -z io,phs mostra hierarquia de protocolos
+  tshark -r captura.pcapng -Y 'dns' -T fields -e frame.time -e ip.src -e dns.qry.name
+    # -Y filtro, -T fields colunas, -e escolhe cada campo
+  tshark -r captura.pcapng -Y 'http.request' -T fields -e ip.src -e http.host -e http.request.uri
+    # mostra origem, host e caminho solicitado
+  tshark -r captura.pcapng -Y 'http.response' -T fields -e http.response.code -e http.content_type
+    # mostra códigos HTTP e tipos de conteúdo
+  tshark -r captura.pcapng -q -z follow,tcp,ascii,0
+    # reconstrói fluxo TCP de índice 0 em texto; teste outros índices
+  tcpdump -nn -r captura.pcap 'port 53'
+    # -nn não resolve nomes/portas, -r lê PCAP, port 53 filtra DNS
+  tcpdump -A -nn -r captura.pcap 'tcp port 80' | less
+    # -A exibe payload ASCII; pode conter HTTP em claro
+Se comando não existir, use Wireshark gráfico; se campo não existir, confira protocolo com tshark -G fields | grep nome.
+
+================== 5. LOG DE SERVIDOR: AWK / GREP / SORT ==================
+Cenário: recebeu access.log e pergunta IP com mais requisições, URL mais acessada, código 404, horário de ataque.
+AVISO: os exemplos presumem formato de log HTTP comum, onde $1 é IP, $7 é URL e $9 é status. Confira 'head -n 3 access.log' antes!
+  head -n 5 access.log
+    # veja estrutura das linhas
+  awk '{print $1}' access.log | sort | uniq -c | sort -nr | head -20
+    # extrai 1ª coluna (IP), agrupa, conta e mostra os 20 mais frequentes
+  awk '{print $7}' access.log | sort | uniq -c | sort -nr | head -20
+    # URLs mais requisitadas no formato padrão
+  awk '$9==404 {print $1, $7}' access.log | head -30
+    # IP e URL em respostas 404 (varredura ou caminhos inexistentes)
+  awk '$9==500 {print $1, $7}' access.log | head -30
+    # erros 500, que podem indicar falhas de aplicação
+  grep -Ein 'admin|login|\.env|\.git|wp-login|flag|backup' access.log | head -50
+    # encontra caminhos/palavras interessantes, com número da linha
+  grep ' 404 ' access.log | wc -l
+    # conta linhas com texto 404 (menos preciso que awk $9)
+  awk '{print $1}' access.log | sort -u | wc -l
+    # número de IPs únicos
+  awk '{print $4}' access.log | sort | uniq -c | sort -nr | head
+    # conta timestamps aproximados; confirme formato
+  awk -F '"' '{print $2}' access.log | head
+    # -F define aspas como separador, extrai trecho da requisição
+Exemplo: linha '192.0.2.10 - - [date] "GET /admin HTTP/1.1" 404 123' => $1 IP, $7 /admin, $9 404.
+
+================== 6. LOG DE REDE / ALERTA SNORT ==================
+Snort é IDS/IPS: inspeciona tráfego e dispara alertas conforme regras. Não presume que alerta = comprometimento.
+Descoberta: snort -V (versão); snort -? (ajuda). Sintaxe varia entre Snort 2 e Snort 3.
+Regra didática Snort 2 (em arquivo local.rules de LABORATÓRIO):
+  alert tcp any any -> any 80 (msg:"LAB HTTP para porta 80"; sid:1000001; rev:1;)
+  # alert=gera alerta; tcp=protocolo; any any=origem IP/porta;
+  # ->=sentido; any 80=destino porta 80; msg=texto; sid=ID único; rev=versão.
+Regra didática para conteúdo em HTTP não criptografado:
+  alert tcp any any -> any 80 (msg:"LAB texto flag em HTTP"; content:"flag{"; nocase; sid:1000002; rev:1;)
+  # content procura bytes 'flag{'; nocase ignora maiúsculas; não funciona para HTTPS criptografado.
+Com Snort 2 configurado no laboratório:
+  snort -T -c /etc/snort/snort.conf
+    # valida a configuração antes de executar
+  snort -r captura.pcap -c /etc/snort/snort.conf -A console
+    # lê PCAP e exibe alertas no console, se a instalação aceitar essas opções
+Snort 3 usa snort.lua e regras/flags diferentes: verifique 'snort --help' e os arquivos locais de configuração.
+Se não houver Snort, abra PCAP no Wireshark/tshark e filtre por IP/porta/conteúdo do alerta.
+
+================== 7. WEB: PRIMEIRA INSPEÇÃO SEM EXPLORAR ==================
+No navegador:
+1. Abra a URL do desafio. Observe título, mensagens, parâmetros ?id=, formulários e redirecionamentos.
+2. Ctrl+U para código-fonte HTML; Ctrl+Shift+I para DevTools (se permitido).
+3. Aba Network: veja requisições e respostas, status 200/301/403/404/500, cookies, JSON.
+4. Aba Sources: veja JS local; pesquise por 'flag', 'token', 'api', 'debug', 'TODO'.
+5. Verifique caminhos apenas se incluídos no escopo do desafio.
+Comandos para URL de laboratório:
+  curl -I http://<HOST>:<PORTA>/
+    # cabeçalhos HTTP, sem corpo
+  curl -i http://<HOST>:<PORTA>/
+    # -i inclui cabeçalhos e corpo
+  curl -s http://<HOST>:<PORTA>/ | grep -Ein 'flag|TODO|secret|api'
+    # -s silencioso; procura pistas no HTML retornado
+  curl -i 'http://<HOST>:<PORTA>/robots.txt'
+    # robots.txt pode mencionar caminhos; não prova permissão para acessá-los
+  curl -i 'http://<HOST>:<PORTA>/.well-known/security.txt'
+    # arquivo de política, quando presente
+  curl -i -X OPTIONS 'http://<HOST>:<PORTA>/'
+    # consulta métodos anunciados; não garante que funcionem
+Códigos: 200 OK; 301/302 redirecionamento; 400 requisição inválida; 401 não autenticado; 403 negado; 404 não encontrado; 500 erro interno.
+
+================== 8. WEB: INPUT, INJECTION E DIAGNÓSTICO EM LAB ==================
+Cenário: formulário aceita entrada e desafio pergunta se é refletida, validada ou executada.
+1. Envie uma palavra inofensiva única, como TESTE_CTF_123, e observe se retorna na página/resposta.
+2. Confira se o valor aparece em HTML, atributo, JS, URL ou apenas no servidor.
+3. Para suspeita de command injection, compare respostas a entradas comuns e registre diferenças de tempo/erro no ambiente autorizado. Não presuma execução por uma mensagem de erro.
+4. Verifique se o backend do LAB usa shell Linux ou Windows, pois sintaxe e ferramentas diferem.
+5. Prefira comprovações não destrutivas fornecidas pelo próprio desafio. Não execute comandos para apagar dados, exfiltrar credenciais ou obter persistência.
+Comandos de inspeção de entrada via curl:
+  curl -i --get --data-urlencode 'q=TESTE_CTF_123' 'http://<HOST>:<PORTA>/search'
+    # --get coloca q na query; --data-urlencode faz escaping seguro
+  curl -i -X POST --data-urlencode 'q=TESTE_CTF_123' 'http://<HOST>:<PORTA>/search'
+    # envia formulário POST URL-encoded
+  curl -i -H 'Content-Type: application/json' -d '{"q":"TESTE_CTF_123"}' 'http://<HOST>:<PORTA>/api/search'
+    # envia JSON; só use se a API espera JSON
+Sinais úteis: reflexão direta, erro de parser, mudança de status, mensagens de validação, resposta diferente entre entradas equivalentes.
+
+================== 9. NMAP: RECEBI IP DE MÁQUINA DE LAB ==================
+  nmap -sT -sV -p 21,22,80,443,445 <IP>
+    # -sT conexão TCP; -sV tenta identificar serviço/versão; -p portas selecionadas
+  nmap -sT -p- <IP>
+    # -p- examina todas as portas TCP; pode demorar, só se autorizado
+  nmap -sT -sV -p 80,443 --script http-title <IP>
+    # script informativo para título HTTP
+  nmap -sT -sV -p 445 --script smb-os-discovery <IP>
+    # consulta informações SMB em laboratório, quando disponíveis
+Leitura: OPEN = serviço responde; CLOSED = porta acessível sem serviço; FILTERED = filtrada/sem resposta conclusiva.
+Mapa rápido: 21 FTP, 22 SSH, 53 DNS, 80/443 web, 139/445 SMB, 3389 RDP, 3306 MySQL, 5432 PostgreSQL.
+Se Nmap não instalado: Linux 'nc -vz <IP> 80' (se nc existir); Windows PowerShell 'Test-NetConnection <IP> -Port 80'.
+
+================== 10. METASPLOIT: ENTENDER RESULTADOS ==================
+Apenas laboratório autorizado. Priorize módulos de identificação e checagem.
+  msfconsole
+    # inicia console
+  search type:auxiliary scanner smb
+    # procura scanners SMB auxiliares
+  search <NOME_DO_SERVICO>
+    # busca módulos relacionados a serviço
+  info <CAMINHO_DO_MODULO>
+    # mostra descrição, opções e referências
+  use <CAMINHO_DO_MODULO>
+    # seleciona módulo autorizado
+  show options
+    # mostra parâmetros obrigatórios
+  set RHOSTS <IP>
+    # define host do laboratório
+  set RPORT <PORTA>
+    # define porta se necessário
+  check
+    # verifica quando módulo implementa check; nem todos implementam
+  back
+    # volta ao contexto anterior
+  exit
+    # encerra
+Nunca conclua vulnerabilidade só porque a versão aparece em busca; confira evidências e escopo. Não use payloads destrutivos ou persistência.
+
+================== 11. WINDOWS: TRIAGEM DE MÁQUINA DO DESAFIO ==================
+CMD:
+  whoami                    # usuário atual
+  hostname                  # nome da máquina
+  systeminfo                # informações do sistema
+  ipconfig /all             # adaptadores e DNS
+  netstat -ano              # conexões, portas, PID
+  tasklist /v               # processos
+  dir /a                    # mostra ocultos
+  type arquivo.txt          # lê texto
+  findstr /spin /c:"flag" *.txt # busca texto em .txt recursivamente; /s subpastas /p ignora binários /i ignora caixa /n número linha
+PowerShell:
+  Get-ComputerInfo | Select-Object WindowsProductName,WindowsVersion
+  Get-Process | Sort-Object CPU -Descending | Select-Object -First 10
+  Get-NetTCPConnection | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State
+  Get-ChildItem C:\ -Force -ErrorAction SilentlyContinue | Select-Object Name,Length
+  Get-WinEvent -ListLog * | Select-Object -First 20 LogName
+  Get-WinEvent -FilterHashtable @{LogName='Security';Id=4625} -MaxEvents 10
+    # tentativas de login malsucedidas; pode exigir permissão
+  Get-WinEvent -FilterHashtable @{LogName='Security';Id=4624} -MaxEvents 10
+    # logins bem-sucedidos; pode exigir permissão
+  Get-WinEvent -FilterHashtable @{LogName='System';Level=2} -MaxEvents 20
+    # erros do log System
+Observação: em PCs compartilhados da FIAP, inspecione apenas o ambiente/VM fornecido para o desafio, não o host institucional sem autorização.
+
+================== 12. LINUX: TRIAGEM DE MÁQUINA DO DESAFIO ==================
+  id                         # UID, GID e grupos
+  whoami                     # usuário
+  hostnamectl                # informações da máquina, quando disponível
+  uname -a                   # kernel
+  ip -br addr                # interfaces e IPs
+  ss -tulpen                 # sockets, portas, processos quando permitido
+  ps aux --sort=-%cpu | head # processos com mais CPU
+  df -h                      # discos
+  ls -lah /home              # diretórios de usuários
+  find /home -type f -iname '*flag*' 2>/dev/null # apenas se diretório estiver no escopo
+  journalctl -n 30 --no-pager # últimas mensagens do journal, se permitido
+  tail -n 50 /var/log/auth.log # autenticação em distros com auth.log; pode exigir acesso
+  history | tail -30         # comandos da sessão, se histórico existir
+Para logs: 'grep -Ein "failed|error|denied" <LOG> | tail -30'.
+
+================== 13. FORENSE DE IMAGEM / ESTEGANOGRAFIA ==================
+  file imagem.png                  # identifica formato real
+  exiftool imagem.jpg             # metadados EXIF, se ferramenta disponível
+  strings -a imagem.png | grep -Ei 'flag|ctf|secret'
+  binwalk imagem.png              # identifica assinaturas de dados embutidos
+  unzip -l suspeito.zip           # lista conteúdo sem extrair
+  7z l suspeito.zip               # alternativa, se instalado
+  python3 -c 'from PIL import Image; im=Image.open("imagem.png"); print(im.size, im.mode)' # se Pillow instalado
+Para PNG: veja metadados, canais de cor, dimensões, chunks, bytes após IEND. Para JPEG: EXIF e arquivos anexados. Para ZIP: listagem e nomes antes de extrair.
+Não execute binários extraídos sem ambiente isolado e autorização.
+
+================== 14. CRIPTO / ENCODING: IDENTIFICAR ANTES DE DECODIFICAR ==================
+Base64: costuma usar A-Z a-z 0-9 + / e padding =; nem toda string assim é Base64.
+  echo 'ZmxhZ3t0ZXN0ZX0=' | base64 -d
+    # retorna flag{teste}; é codificação, não criptografia
+Hex:
+  echo '666c61677b74657374657d' | xxd -r -p
+    # -r -p converte hex puro em bytes => flag{teste}
+ROT13:
+  echo 'synt{grfgr}' | tr 'A-Za-z' 'N-ZA-Mn-za-m'
+    # substituição ROT13 => flag{teste}
+URL decode Python:
+  python3 -c 'import urllib.parse; print(urllib.parse.unquote("flag%7Bteste%7D"))'
+Hashes:
+  printf '%s' 'teste' | sha256sum
+    # printf sem quebra de linha; hash NÃO é reversível diretamente
+  md5sum arquivo.txt; sha256sum arquivo.txt
+    # identifica integridade; não confundir hash com texto codificado
+Dica: texto aparentemente aleatório pode ser compactado, cifrado ou binário; não tente 'base64 -d' cegamente em tudo.
+
+================== 15. JSON / CSV / JQ / SED ==================
+  jq '.' resposta.json
+    # formata JSON
+  jq -r '.users[] | [.name,.role] | @tsv' resposta.json
+    # extrai nome e papel de array users; ajuste chaves ao JSON real
+  jq -r '.. | strings | select(test("flag|ctf";"i"))' resposta.json
+    # busca strings contendo flag/ctf em profundidade
+  sed -n '1,30p' arquivo.txt
+    # mostra linhas 1–30 sem alterar arquivo
+  sed -n '/ERROR/p' app.log
+    # mostra linhas que contêm ERROR
+  cut -d ',' -f 1,3 dados.csv | head
+    # extrai colunas 1 e 3 de CSV simples (não trata vírgulas dentro de aspas)
+  awk -F, 'NR>1 {print $1,$3}' dados.csv | head
+    # separador vírgula; pula cabeçalho; também não trata CSV complexo
+
+================== 16. WINDOWS AD / EVENTOS (LAB) ==================
+Cenário: desafio entrega logs Windows e pede usuário, máquina, horário ou falha de autenticação.
+IDs úteis: 4624 logon sucesso; 4625 falha; 4688 processo criado (se auditoria ativada); 4720 usuário criado; 4740 conta bloqueada; 4768 solicitação TGT; 4769 solicitação ticket de serviço; 4771 pré-autenticação Kerberos falhou.
+PowerShell:
+  Get-WinEvent -FilterHashtable @{LogName='Security';Id=4769} -MaxEvents 20 | Format-List TimeCreated,Id,Message
+    # tickets de serviço; eventos dependem de auditoria e privilégios
+  Get-WinEvent -FilterHashtable @{LogName='Security';Id=4740} -MaxEvents 20 | Format-List TimeCreated,Message
+    # contas bloqueadas
+  Get-ADDomain
+    # informações do domínio somente com módulo AD e permissões
+  Get-ADUser -Filter * | Select-Object -First 20 SamAccountName,Enabled
+    # enumeração de usuários somente no domínio de laboratório autorizado
+Se comandos Get-AD* não existirem: módulo RSAT pode não estar instalado; não é erro do desafio necessariamente.
+
+================== 17. BINÁRIO / REVERSING: TRIAGEM SEGURA ==================
+  file programa
+  sha256sum programa
+  strings -a -n 6 programa | grep -Ein 'flag|wrong|correct|password|usage'
+  readelf -h programa           # ELF: cabeçalho
+  readelf -s programa | head    # ELF: símbolos
+  objdump -d programa | head -60 # desmontagem inicial, sem executar
+Windows PE: 'file programa.exe', 'strings', 'Format-Hex', ferramenta de análise estática disponível.
+Observe mensagens de erro, strings codificadas, funções de comparação e argumentos esperados. Só execute amostras em VM de desafio, não no computador institucional.
+
+================== 18. MINI-CENÁRIOS RESOLVIDOS ==================
+A) Pergunta: 'Qual IP fez mais requisições?'
+   Material: access.log. Solução: head -n 2 access.log; awk '{print $1}' access.log | sort | uniq -c | sort -nr | head
+   Leia a primeira linha da saída: contagem + IP. Valide se $1 é IP.
+B) Pergunta: 'Qual domínio suspeito foi consultado?'
+   Material: captura.pcapng. Solução: tshark -r captura.pcapng -Y dns.qry.name -T fields -e dns.qry.name | sort | uniq -c | sort -nr
+   Compare frequência e nomes estranhos; suspeito não significa automaticamente malicioso.
+C) Pergunta: 'Qual arquivo foi baixado por HTTP?'
+   Wireshark: File > Export Objects > HTTP; ou filtre 'http.response' e Follow Stream.
+   Observe Content-Disposition, URI e corpo; não execute arquivos extraídos.
+D) Pergunta: 'Qual conta teve falhas de login?'
+   Windows LAB: Get-WinEvent -FilterHashtable @{LogName='Security';Id=4625} -MaxEvents 30 | Format-List TimeCreated,Message
+   Identifique TargetUserName no texto do evento.
+E) Pergunta: 'Há texto escondido na imagem?'
+   file, exiftool, strings, binwalk; depois inspeção visual e canais, se ferramentas existirem.
+F) Pergunta: 'Qual serviço roda na porta 8080?'
+   nmap -sT -sV -p 8080 <IP> ; curl -I http://<IP>:8080/
+   Compare banner, título e resposta; versão detectada pode estar errada.
+G) Pergunta: 'A flag parece ZmxhZ3...'
+   echo '<TEXTO>' | base64 -d; confira se resultado legível e formato correto.
+H) Pergunta: 'Qual endpoint retorna erro 500?'
+   awk '$9==500 {print $7}' access.log | sort | uniq -c | sort -nr
+   Confirme formato do log; veja IP, horário e caminho associado.
+I) Pergunta: 'Há processo incomum no Windows?'
+   Get-Process | Sort-Object CPU -Descending | Select-Object -First 20 Name,Id,CPU
+   Compare com enunciado; alto uso não prova malware.
+J) Pergunta: 'Encontrar mensagem em tráfego HTTP'
+   Wireshark: filtro http; selecione requisição relevante; Follow > TCP Stream; pesquise flag, token, comentário ou conteúdo retornado.
+
+================== 19. ARMADILHAS QUE FAZEM PERDER TEMPO ==================
+- Trocar filtros de captura por filtros de exibição: Wireshark 'http' é filtro de exibição.
+- Rodar 'grep' em binário e concluir que não há nada: tente 'strings' e 'file'.
+- Achar que HTTPS em PCAP é legível sem chaves: normalmente não é.
+- Usar 'awk $9' sem conferir formato do access.log.
+- Copiar '<IP>' literalmente: substitua pelos dados do laboratório.
+- Rodar comando Linux no CMD: verifique shell e sistema.
+- Interpretar 403 como ausência de recurso: 403 = acesso negado.
+- Confundir MD5/SHA256 com Base64: hash não é decodificação.
+- Tratar saída de scanner como prova de exploração.
+- Perder 30 minutos em um único desafio quando há pontos mais fáceis.
+
+================== 20. CHECKLIST FINAL DE 60 SEGUNDOS ==================
+[ ] Qual é a categoria? [ ] Qual é o escopo? [ ] Qual é o formato da flag?
+[ ] Tenho arquivo, URL, IP, credenciais de lab ou PCAP?
+[ ] Usei 'file', 'strings', 'head', 'ls -la' ou equivalente?
+[ ] Se PCAP: Protocol Hierarchy > Conversations > Follow Stream.
+[ ] Se log: head > grep > awk > sort/uniq.
+[ ] Se web: fonte > DevTools > Network > cabeçalhos > parâmetros.
+[ ] Se Windows: dir /a, Get-ChildItem -Force, eventos, processos.
+[ ] Se Linux: ls -lah, find, grep, ss, logs do lab.
+[ ] Registrei evidências e a flag exata? [ ] Vale mudar de desafio?
+
+Boa competição! Priorize precisão, tempo e escopo autorizado.
