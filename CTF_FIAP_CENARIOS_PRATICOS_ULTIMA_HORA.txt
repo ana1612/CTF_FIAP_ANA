@@ -1,0 +1,384 @@
+CTF FIAP — CENÁRIOS PRÁTICOS E COMANDOS COMENTADOS
+GUIA DE ÚLTIMA HORA | USAR SOMENTE EM ALVOS AUTORIZADOS DA COMPETIÇÃO
+
+COMO USAR: Ctrl+F e pesquise: PCAP, LOG, WINDOWS, WEB, LINUX, SNORT, AWK, METASPLOIT, FORENSE, CRIPTO, ESTEGANO, AD, FLAG, SOCORRO.
+Símbolos: <ARQUIVO>, <IP>, <PORTA>, <URL> = substitua por valores do desafio. Exemplos usam alvos locais ou de laboratório.
+Atenção: NÃO execute comandos de alteração, exploração ou varredura fora do escopo permitido pelo CTF. Não faça upload de artefatos confidenciais a serviços públicos.
+
+================== 0. SOCORRO: NÃO SEI POR ONDE COMEÇAR ==================
+1) Leia o enunciado inteiro. Anote formato da flag, objetivo, arquivos e escopo.
+2) Classifique: WEB / REDE-PCAP / FORENSE / CRIPTO / BINÁRIO / WINDOWS / LINUX / AD.
+3) Identifique o material: arquivo? URL? IP? credenciais de laboratório? dump?
+4) Faça primeiro inspeção NÃO destrutiva. Registre pistas em um TXT local.
+5) Não confunda encontrar vulnerabilidade com encontrar a flag: leia a saída.
+6) Se 10–15 min sem avanço, anote o que tentou, pule e volte depois.
+7) A flag pode estar em comentário HTML, cabeçalho, metadado, log, cookie, pacote, imagem, pasta oculta ou variável de ambiente de laboratório.
+8) Confira maiúsculas, minúsculas, chaves e espaços da flag exatamente.
+
+COMANDOS DE DESCOBERTA DE FERRAMENTAS:
+Linux: command -v nmap; command -v tshark; command -v snort; command -v python3
+Windows CMD: where python; where nmap; where powershell
+PowerShell: Get-Command python,nmap,Get-FileHash -ErrorAction SilentlyContinue
+Ajuda embutida: comando --help | less ; man comando ; Get-Help Get-ChildItem -Examples
+
+================== 1. RECEBI ARQUIVO DESCONHECIDO ==================
+Linux:
+  pwd                                # pasta atual
+  ls -lah                            # mostra inclusive arquivos ocultos, tamanhos
+  file desafio.bin                   # identifica formato real, não confie na extensão
+  stat desafio.bin                   # datas, tamanho e permissões
+  sha256sum desafio.bin              # calcula hash para identificar cópias
+  strings -a -n 5 desafio.bin | less  # extrai sequências legíveis com >=5 caracteres
+  strings -a desafio.bin | grep -Ein 'flag|ctf|pass|token|secret|key' # procura pistas
+  xxd -l 128 desafio.bin             # primeiros 128 bytes em hexadecimal
+  hexdump -C desafio.bin | head      # alternativa ao xxd
+  find . -maxdepth 3 -type f         # lista arquivos até 3 níveis
+Windows PowerShell:
+  Get-ChildItem -Force               # lista arquivos ocultos
+  Get-Item .\desafio.bin | Format-List * # metadados do arquivo
+  Get-FileHash .\desafio.bin -Algorithm SHA256 # hash
+  Format-Hex -Path .\desafio.bin | Select-Object -First 12 # início hexadecimal
+  Get-ChildItem -Recurse -File | Select-String -Pattern 'flag|ctf|secret' # texto em arquivos legíveis
+Interpretação: PK no início sugere ZIP; 89 50 4E 47 sugere PNG; 25 50 44 46 sugere PDF; MZ sugere PE Windows; 7F 45 4C 46 sugere ELF.
+Próximo passo: use a seção correspondente ao tipo real detectado.
+
+================== 2. FLAG ESCONDIDA EM PASTAS OU TEXTO ==================
+Linux:
+  find . -type f -iname '*flag*' 2>/dev/null
+  find . -type f -name '.*' 2>/dev/null
+  grep -RinE 'flag\{|ctf\{|password|secret' . 2>/dev/null
+  grep -RIl 'flag' . 2>/dev/null  # mostra apenas nomes de arquivos com ocorrência
+  find . -type f -size -10k         # arquivos pequenos, comuns em desafios
+Windows PowerShell:
+  Get-ChildItem -Force -Recurse -File | Where-Object Name -match 'flag|secret|pass'
+  Get-ChildItem -Recurse -File -ErrorAction SilentlyContinue | Select-String -Pattern 'flag\{|ctf\{' -ErrorAction SilentlyContinue
+  Get-ChildItem Env:                 # variáveis de ambiente, somente na máquina do desafio
+Dica: em Linux, Ctrl+H no gerenciador de arquivos costuma mostrar ocultos; ls -la no terminal.
+
+================== 3. RECEBI PCAP: WIRESHARK ==================
+Passos gráficos:
+1. File > Open > arquivo.pcapng.
+2. Statistics > Protocol Hierarchy: veja HTTP, DNS, SMB, FTP, ICMP etc.
+3. Statistics > Conversations: veja quem fala com quem.
+4. Filtro 'http' para tráfego HTTP; 'dns' para DNS; 'tcp.stream eq 0' para um fluxo.
+5. Clique direito no pacote > Follow > TCP Stream (ou HTTP Stream): veja a conversa completa.
+6. File > Export Objects > HTTP (quando houver): arquivos transferidos.
+Filtros Wireshark (barra de filtro):
+  http
+  dns
+  dns.qry.name contains "flag"
+  http.request
+  http.request.method == "POST"
+  http.response.code == 200
+  http contains "flag"
+  tcp contains "flag"
+  frame contains "CTF"
+  ip.addr == 192.0.2.10
+  tcp.port == 80
+  smb2
+  ftp
+  icmp
+  tcp.analysis.retransmission
+Observações: filtros de exibição não alteram o arquivo. HTTP sem TLS pode revelar texto; HTTPS normalmente é criptografado. 'contains' encontra bytes visíveis, não descriptografa TLS.
+
+================== 4. RECEBI PCAP: TSHARK / TCPDUMP ==================
+  tshark -r captura.pcapng -q -z io,phs
+    # -r lê arquivo, -q resumo, -z io,phs mostra hierarquia de protocolos
+  tshark -r captura.pcapng -Y 'dns' -T fields -e frame.time -e ip.src -e dns.qry.name
+    # -Y filtro, -T fields colunas, -e escolhe cada campo
+  tshark -r captura.pcapng -Y 'http.request' -T fields -e ip.src -e http.host -e http.request.uri
+    # mostra origem, host e caminho solicitado
+  tshark -r captura.pcapng -Y 'http.response' -T fields -e http.response.code -e http.content_type
+    # mostra códigos HTTP e tipos de conteúdo
+  tshark -r captura.pcapng -q -z follow,tcp,ascii,0
+    # reconstrói fluxo TCP de índice 0 em texto; teste outros índices
+  tcpdump -nn -r captura.pcap 'port 53'
+    # -nn não resolve nomes/portas, -r lê PCAP, port 53 filtra DNS
+  tcpdump -A -nn -r captura.pcap 'tcp port 80' | less
+    # -A exibe payload ASCII; pode conter HTTP em claro
+Se comando não existir, use Wireshark gráfico; se campo não existir, confira protocolo com tshark -G fields | grep nome.
+
+================== 5. LOG DE SERVIDOR: AWK / GREP / SORT ==================
+Cenário: recebeu access.log e pergunta IP com mais requisições, URL mais acessada, código 404, horário de ataque.
+AVISO: os exemplos presumem formato de log HTTP comum, onde $1 é IP, $7 é URL e $9 é status. Confira 'head -n 3 access.log' antes!
+  head -n 5 access.log
+    # veja estrutura das linhas
+  awk '{print $1}' access.log | sort | uniq -c | sort -nr | head -20
+    # extrai 1ª coluna (IP), agrupa, conta e mostra os 20 mais frequentes
+  awk '{print $7}' access.log | sort | uniq -c | sort -nr | head -20
+    # URLs mais requisitadas no formato padrão
+  awk '$9==404 {print $1, $7}' access.log | head -30
+    # IP e URL em respostas 404 (varredura ou caminhos inexistentes)
+  awk '$9==500 {print $1, $7}' access.log | head -30
+    # erros 500, que podem indicar falhas de aplicação
+  grep -Ein 'admin|login|\.env|\.git|wp-login|flag|backup' access.log | head -50
+    # encontra caminhos/palavras interessantes, com número da linha
+  grep ' 404 ' access.log | wc -l
+    # conta linhas com texto 404 (menos preciso que awk $9)
+  awk '{print $1}' access.log | sort -u | wc -l
+    # número de IPs únicos
+  awk '{print $4}' access.log | sort | uniq -c | sort -nr | head
+    # conta timestamps aproximados; confirme formato
+  awk -F '"' '{print $2}' access.log | head
+    # -F define aspas como separador, extrai trecho da requisição
+Exemplo: linha '192.0.2.10 - - [date] "GET /admin HTTP/1.1" 404 123' => $1 IP, $7 /admin, $9 404.
+
+================== 6. LOG DE REDE / ALERTA SNORT ==================
+Snort é IDS/IPS: inspeciona tráfego e dispara alertas conforme regras. Não presume que alerta = comprometimento.
+Descoberta: snort -V (versão); snort -? (ajuda). Sintaxe varia entre Snort 2 e Snort 3.
+Regra didática Snort 2 (em arquivo local.rules de LABORATÓRIO):
+  alert tcp any any -> any 80 (msg:"LAB HTTP para porta 80"; sid:1000001; rev:1;)
+  # alert=gera alerta; tcp=protocolo; any any=origem IP/porta;
+  # ->=sentido; any 80=destino porta 80; msg=texto; sid=ID único; rev=versão.
+Regra didática para conteúdo em HTTP não criptografado:
+  alert tcp any any -> any 80 (msg:"LAB texto flag em HTTP"; content:"flag{"; nocase; sid:1000002; rev:1;)
+  # content procura bytes 'flag{'; nocase ignora maiúsculas; não funciona para HTTPS criptografado.
+Com Snort 2 configurado no laboratório:
+  snort -T -c /etc/snort/snort.conf
+    # valida a configuração antes de executar
+  snort -r captura.pcap -c /etc/snort/snort.conf -A console
+    # lê PCAP e exibe alertas no console, se a instalação aceitar essas opções
+Snort 3 usa snort.lua e regras/flags diferentes: verifique 'snort --help' e os arquivos locais de configuração.
+Se não houver Snort, abra PCAP no Wireshark/tshark e filtre por IP/porta/conteúdo do alerta.
+
+================== 7. WEB: PRIMEIRA INSPEÇÃO SEM EXPLORAR ==================
+No navegador:
+1. Abra a URL do desafio. Observe título, mensagens, parâmetros ?id=, formulários e redirecionamentos.
+2. Ctrl+U para código-fonte HTML; Ctrl+Shift+I para DevTools (se permitido).
+3. Aba Network: veja requisições e respostas, status 200/301/403/404/500, cookies, JSON.
+4. Aba Sources: veja JS local; pesquise por 'flag', 'token', 'api', 'debug', 'TODO'.
+5. Verifique caminhos apenas se incluídos no escopo do desafio.
+Comandos para URL de laboratório:
+  curl -I http://<HOST>:<PORTA>/
+    # cabeçalhos HTTP, sem corpo
+  curl -i http://<HOST>:<PORTA>/
+    # -i inclui cabeçalhos e corpo
+  curl -s http://<HOST>:<PORTA>/ | grep -Ein 'flag|TODO|secret|api'
+    # -s silencioso; procura pistas no HTML retornado
+  curl -i 'http://<HOST>:<PORTA>/robots.txt'
+    # robots.txt pode mencionar caminhos; não prova permissão para acessá-los
+  curl -i 'http://<HOST>:<PORTA>/.well-known/security.txt'
+    # arquivo de política, quando presente
+  curl -i -X OPTIONS 'http://<HOST>:<PORTA>/'
+    # consulta métodos anunciados; não garante que funcionem
+Códigos: 200 OK; 301/302 redirecionamento; 400 requisição inválida; 401 não autenticado; 403 negado; 404 não encontrado; 500 erro interno.
+
+================== 8. WEB: INPUT, INJECTION E DIAGNÓSTICO EM LAB ==================
+Cenário: formulário aceita entrada e desafio pergunta se é refletida, validada ou executada.
+1. Envie uma palavra inofensiva única, como TESTE_CTF_123, e observe se retorna na página/resposta.
+2. Confira se o valor aparece em HTML, atributo, JS, URL ou apenas no servidor.
+3. Para suspeita de command injection, compare respostas a entradas comuns e registre diferenças de tempo/erro no ambiente autorizado. Não presuma execução por uma mensagem de erro.
+4. Verifique se o backend do LAB usa shell Linux ou Windows, pois sintaxe e ferramentas diferem.
+5. Prefira comprovações não destrutivas fornecidas pelo próprio desafio. Não execute comandos para apagar dados, exfiltrar credenciais ou obter persistência.
+Comandos de inspeção de entrada via curl:
+  curl -i --get --data-urlencode 'q=TESTE_CTF_123' 'http://<HOST>:<PORTA>/search'
+    # --get coloca q na query; --data-urlencode faz escaping seguro
+  curl -i -X POST --data-urlencode 'q=TESTE_CTF_123' 'http://<HOST>:<PORTA>/search'
+    # envia formulário POST URL-encoded
+  curl -i -H 'Content-Type: application/json' -d '{"q":"TESTE_CTF_123"}' 'http://<HOST>:<PORTA>/api/search'
+    # envia JSON; só use se a API espera JSON
+Sinais úteis: reflexão direta, erro de parser, mudança de status, mensagens de validação, resposta diferente entre entradas equivalentes.
+
+================== 9. NMAP: RECEBI IP DE MÁQUINA DE LAB ==================
+  nmap -sT -sV -p 21,22,80,443,445 <IP>
+    # -sT conexão TCP; -sV tenta identificar serviço/versão; -p portas selecionadas
+  nmap -sT -p- <IP>
+    # -p- examina todas as portas TCP; pode demorar, só se autorizado
+  nmap -sT -sV -p 80,443 --script http-title <IP>
+    # script informativo para título HTTP
+  nmap -sT -sV -p 445 --script smb-os-discovery <IP>
+    # consulta informações SMB em laboratório, quando disponíveis
+Leitura: OPEN = serviço responde; CLOSED = porta acessível sem serviço; FILTERED = filtrada/sem resposta conclusiva.
+Mapa rápido: 21 FTP, 22 SSH, 53 DNS, 80/443 web, 139/445 SMB, 3389 RDP, 3306 MySQL, 5432 PostgreSQL.
+Se Nmap não instalado: Linux 'nc -vz <IP> 80' (se nc existir); Windows PowerShell 'Test-NetConnection <IP> -Port 80'.
+
+================== 10. METASPLOIT: ENTENDER RESULTADOS ==================
+Apenas laboratório autorizado. Priorize módulos de identificação e checagem.
+  msfconsole
+    # inicia console
+  search type:auxiliary scanner smb
+    # procura scanners SMB auxiliares
+  search <NOME_DO_SERVICO>
+    # busca módulos relacionados a serviço
+  info <CAMINHO_DO_MODULO>
+    # mostra descrição, opções e referências
+  use <CAMINHO_DO_MODULO>
+    # seleciona módulo autorizado
+  show options
+    # mostra parâmetros obrigatórios
+  set RHOSTS <IP>
+    # define host do laboratório
+  set RPORT <PORTA>
+    # define porta se necessário
+  check
+    # verifica quando módulo implementa check; nem todos implementam
+  back
+    # volta ao contexto anterior
+  exit
+    # encerra
+Nunca conclua vulnerabilidade só porque a versão aparece em busca; confira evidências e escopo. Não use payloads destrutivos ou persistência.
+
+================== 11. WINDOWS: TRIAGEM DE MÁQUINA DO DESAFIO ==================
+CMD:
+  whoami                    # usuário atual
+  hostname                  # nome da máquina
+  systeminfo                # informações do sistema
+  ipconfig /all             # adaptadores e DNS
+  netstat -ano              # conexões, portas, PID
+  tasklist /v               # processos
+  dir /a                    # mostra ocultos
+  type arquivo.txt          # lê texto
+  findstr /spin /c:"flag" *.txt # busca texto em .txt recursivamente; /s subpastas /p ignora binários /i ignora caixa /n número linha
+PowerShell:
+  Get-ComputerInfo | Select-Object WindowsProductName,WindowsVersion
+  Get-Process | Sort-Object CPU -Descending | Select-Object -First 10
+  Get-NetTCPConnection | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State
+  Get-ChildItem C:\ -Force -ErrorAction SilentlyContinue | Select-Object Name,Length
+  Get-WinEvent -ListLog * | Select-Object -First 20 LogName
+  Get-WinEvent -FilterHashtable @{LogName='Security';Id=4625} -MaxEvents 10
+    # tentativas de login malsucedidas; pode exigir permissão
+  Get-WinEvent -FilterHashtable @{LogName='Security';Id=4624} -MaxEvents 10
+    # logins bem-sucedidos; pode exigir permissão
+  Get-WinEvent -FilterHashtable @{LogName='System';Level=2} -MaxEvents 20
+    # erros do log System
+Observação: em PCs compartilhados da FIAP, inspecione apenas o ambiente/VM fornecido para o desafio, não o host institucional sem autorização.
+
+================== 12. LINUX: TRIAGEM DE MÁQUINA DO DESAFIO ==================
+  id                         # UID, GID e grupos
+  whoami                     # usuário
+  hostnamectl                # informações da máquina, quando disponível
+  uname -a                   # kernel
+  ip -br addr                # interfaces e IPs
+  ss -tulpen                 # sockets, portas, processos quando permitido
+  ps aux --sort=-%cpu | head # processos com mais CPU
+  df -h                      # discos
+  ls -lah /home              # diretórios de usuários
+  find /home -type f -iname '*flag*' 2>/dev/null # apenas se diretório estiver no escopo
+  journalctl -n 30 --no-pager # últimas mensagens do journal, se permitido
+  tail -n 50 /var/log/auth.log # autenticação em distros com auth.log; pode exigir acesso
+  history | tail -30         # comandos da sessão, se histórico existir
+Para logs: 'grep -Ein "failed|error|denied" <LOG> | tail -30'.
+
+================== 13. FORENSE DE IMAGEM / ESTEGANOGRAFIA ==================
+  file imagem.png                  # identifica formato real
+  exiftool imagem.jpg             # metadados EXIF, se ferramenta disponível
+  strings -a imagem.png | grep -Ei 'flag|ctf|secret'
+  binwalk imagem.png              # identifica assinaturas de dados embutidos
+  unzip -l suspeito.zip           # lista conteúdo sem extrair
+  7z l suspeito.zip               # alternativa, se instalado
+  python3 -c 'from PIL import Image; im=Image.open("imagem.png"); print(im.size, im.mode)' # se Pillow instalado
+Para PNG: veja metadados, canais de cor, dimensões, chunks, bytes após IEND. Para JPEG: EXIF e arquivos anexados. Para ZIP: listagem e nomes antes de extrair.
+Não execute binários extraídos sem ambiente isolado e autorização.
+
+================== 14. CRIPTO / ENCODING: IDENTIFICAR ANTES DE DECODIFICAR ==================
+Base64: costuma usar A-Z a-z 0-9 + / e padding =; nem toda string assim é Base64.
+  echo 'ZmxhZ3t0ZXN0ZX0=' | base64 -d
+    # retorna flag{teste}; é codificação, não criptografia
+Hex:
+  echo '666c61677b74657374657d' | xxd -r -p
+    # -r -p converte hex puro em bytes => flag{teste}
+ROT13:
+  echo 'synt{grfgr}' | tr 'A-Za-z' 'N-ZA-Mn-za-m'
+    # substituição ROT13 => flag{teste}
+URL decode Python:
+  python3 -c 'import urllib.parse; print(urllib.parse.unquote("flag%7Bteste%7D"))'
+Hashes:
+  printf '%s' 'teste' | sha256sum
+    # printf sem quebra de linha; hash NÃO é reversível diretamente
+  md5sum arquivo.txt; sha256sum arquivo.txt
+    # identifica integridade; não confundir hash com texto codificado
+Dica: texto aparentemente aleatório pode ser compactado, cifrado ou binário; não tente 'base64 -d' cegamente em tudo.
+
+================== 15. JSON / CSV / JQ / SED ==================
+  jq '.' resposta.json
+    # formata JSON
+  jq -r '.users[] | [.name,.role] | @tsv' resposta.json
+    # extrai nome e papel de array users; ajuste chaves ao JSON real
+  jq -r '.. | strings | select(test("flag|ctf";"i"))' resposta.json
+    # busca strings contendo flag/ctf em profundidade
+  sed -n '1,30p' arquivo.txt
+    # mostra linhas 1–30 sem alterar arquivo
+  sed -n '/ERROR/p' app.log
+    # mostra linhas que contêm ERROR
+  cut -d ',' -f 1,3 dados.csv | head
+    # extrai colunas 1 e 3 de CSV simples (não trata vírgulas dentro de aspas)
+  awk -F, 'NR>1 {print $1,$3}' dados.csv | head
+    # separador vírgula; pula cabeçalho; também não trata CSV complexo
+
+================== 16. WINDOWS AD / EVENTOS (LAB) ==================
+Cenário: desafio entrega logs Windows e pede usuário, máquina, horário ou falha de autenticação.
+IDs úteis: 4624 logon sucesso; 4625 falha; 4688 processo criado (se auditoria ativada); 4720 usuário criado; 4740 conta bloqueada; 4768 solicitação TGT; 4769 solicitação ticket de serviço; 4771 pré-autenticação Kerberos falhou.
+PowerShell:
+  Get-WinEvent -FilterHashtable @{LogName='Security';Id=4769} -MaxEvents 20 | Format-List TimeCreated,Id,Message
+    # tickets de serviço; eventos dependem de auditoria e privilégios
+  Get-WinEvent -FilterHashtable @{LogName='Security';Id=4740} -MaxEvents 20 | Format-List TimeCreated,Message
+    # contas bloqueadas
+  Get-ADDomain
+    # informações do domínio somente com módulo AD e permissões
+  Get-ADUser -Filter * | Select-Object -First 20 SamAccountName,Enabled
+    # enumeração de usuários somente no domínio de laboratório autorizado
+Se comandos Get-AD* não existirem: módulo RSAT pode não estar instalado; não é erro do desafio necessariamente.
+
+================== 17. BINÁRIO / REVERSING: TRIAGEM SEGURA ==================
+  file programa
+  sha256sum programa
+  strings -a -n 6 programa | grep -Ein 'flag|wrong|correct|password|usage'
+  readelf -h programa           # ELF: cabeçalho
+  readelf -s programa | head    # ELF: símbolos
+  objdump -d programa | head -60 # desmontagem inicial, sem executar
+Windows PE: 'file programa.exe', 'strings', 'Format-Hex', ferramenta de análise estática disponível.
+Observe mensagens de erro, strings codificadas, funções de comparação e argumentos esperados. Só execute amostras em VM de desafio, não no computador institucional.
+
+================== 18. MINI-CENÁRIOS RESOLVIDOS ==================
+A) Pergunta: 'Qual IP fez mais requisições?'
+   Material: access.log. Solução: head -n 2 access.log; awk '{print $1}' access.log | sort | uniq -c | sort -nr | head
+   Leia a primeira linha da saída: contagem + IP. Valide se $1 é IP.
+B) Pergunta: 'Qual domínio suspeito foi consultado?'
+   Material: captura.pcapng. Solução: tshark -r captura.pcapng -Y dns.qry.name -T fields -e dns.qry.name | sort | uniq -c | sort -nr
+   Compare frequência e nomes estranhos; suspeito não significa automaticamente malicioso.
+C) Pergunta: 'Qual arquivo foi baixado por HTTP?'
+   Wireshark: File > Export Objects > HTTP; ou filtre 'http.response' e Follow Stream.
+   Observe Content-Disposition, URI e corpo; não execute arquivos extraídos.
+D) Pergunta: 'Qual conta teve falhas de login?'
+   Windows LAB: Get-WinEvent -FilterHashtable @{LogName='Security';Id=4625} -MaxEvents 30 | Format-List TimeCreated,Message
+   Identifique TargetUserName no texto do evento.
+E) Pergunta: 'Há texto escondido na imagem?'
+   file, exiftool, strings, binwalk; depois inspeção visual e canais, se ferramentas existirem.
+F) Pergunta: 'Qual serviço roda na porta 8080?'
+   nmap -sT -sV -p 8080 <IP> ; curl -I http://<IP>:8080/
+   Compare banner, título e resposta; versão detectada pode estar errada.
+G) Pergunta: 'A flag parece ZmxhZ3...'
+   echo '<TEXTO>' | base64 -d; confira se resultado legível e formato correto.
+H) Pergunta: 'Qual endpoint retorna erro 500?'
+   awk '$9==500 {print $7}' access.log | sort | uniq -c | sort -nr
+   Confirme formato do log; veja IP, horário e caminho associado.
+I) Pergunta: 'Há processo incomum no Windows?'
+   Get-Process | Sort-Object CPU -Descending | Select-Object -First 20 Name,Id,CPU
+   Compare com enunciado; alto uso não prova malware.
+J) Pergunta: 'Encontrar mensagem em tráfego HTTP'
+   Wireshark: filtro http; selecione requisição relevante; Follow > TCP Stream; pesquise flag, token, comentário ou conteúdo retornado.
+
+================== 19. ARMADILHAS QUE FAZEM PERDER TEMPO ==================
+- Trocar filtros de captura por filtros de exibição: Wireshark 'http' é filtro de exibição.
+- Rodar 'grep' em binário e concluir que não há nada: tente 'strings' e 'file'.
+- Achar que HTTPS em PCAP é legível sem chaves: normalmente não é.
+- Usar 'awk $9' sem conferir formato do access.log.
+- Copiar '<IP>' literalmente: substitua pelos dados do laboratório.
+- Rodar comando Linux no CMD: verifique shell e sistema.
+- Interpretar 403 como ausência de recurso: 403 = acesso negado.
+- Confundir MD5/SHA256 com Base64: hash não é decodificação.
+- Tratar saída de scanner como prova de exploração.
+- Perder 30 minutos em um único desafio quando há pontos mais fáceis.
+
+================== 20. CHECKLIST FINAL DE 60 SEGUNDOS ==================
+[ ] Qual é a categoria? [ ] Qual é o escopo? [ ] Qual é o formato da flag?
+[ ] Tenho arquivo, URL, IP, credenciais de lab ou PCAP?
+[ ] Usei 'file', 'strings', 'head', 'ls -la' ou equivalente?
+[ ] Se PCAP: Protocol Hierarchy > Conversations > Follow Stream.
+[ ] Se log: head > grep > awk > sort/uniq.
+[ ] Se web: fonte > DevTools > Network > cabeçalhos > parâmetros.
+[ ] Se Windows: dir /a, Get-ChildItem -Force, eventos, processos.
+[ ] Se Linux: ls -lah, find, grep, ss, logs do lab.
+[ ] Registrei evidências e a flag exata? [ ] Vale mudar de desafio?
+
+Boa competição! Priorize precisão, tempo e escopo autorizado.
